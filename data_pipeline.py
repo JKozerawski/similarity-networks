@@ -8,22 +8,6 @@ from tensorflow.python.platform import gfile
 
 MAX_NUM_IMAGES_PER_CLASS = 2 ** 27 - 1  # ~134M
 
-def should_distort_images(flip_left_right, random_crop, random_scale,
-                          random_brightness):
-  """Whether any distortions are enabled, from the input flags.
-
-  Args:
-    flip_left_right: Boolean whether to randomly mirror images horizontally.
-    random_crop: Integer percentage setting the total margin used around the
-    crop box.
-    random_scale: Integer percentage of how much to vary the scale by.
-    random_brightness: Integer range to randomly multiply the pixel values by.
-
-  Returns:
-    Boolean value indicating whether any distortions should be applied.
-  """
-  return (flip_left_right or (random_crop != 0) or (random_scale != 0) or
-          (random_brightness != 0))
 
 def get_images(image_dir, sub_dir, extensions):
 	file_list = []
@@ -65,18 +49,12 @@ def get_random_image_tuples(sim_label, list_pos, list_neg, no_of_pos = 1, no_of_
 def create_image_lists(image_dir, testing_percentage=30, validation_percentage=21, positive_examples_per_category=100, positives_to_negatives_ratio = 1., no_of_positive_inputs = 1, no_of_negative_inputs = 0):
 	"""Builds a list of training images from the file system.
 
-	Analyzes the sub folders in the image directory, splits them into stable
-	training, testing, and validation sets, and returns a data structure
-	describing the lists of images for each label and their paths.
 
 	Args:
-	image_dir: String path to a folder containing subfolders of images.
-	testing_percentage: Integer percentage of the images to reserve for tests.
-	validation_percentage: Integer percentage of images reserved for validation.
+	describe args
 
 	Returns:
-	A dictionary containing an entry for each label subfolder, with images split
-	into training, testing, and validation sets within each label.
+	describe output
 	"""
 	negative_examples_per_category = int(positive_examples_per_category/positives_to_negatives_ratio)		# how many image pairs per category
 
