@@ -1,7 +1,5 @@
-# tuple-networks
+# similarity-networks
 
-Tuple networks project
+Similarity networks project
 
-First: create siamese network
-
-Second: create triplet net (two pos, one query)
+Description to be added
