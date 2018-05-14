@@ -6,25 +6,38 @@ import numpy as np
 from glob import glob
 import argparse
 import pickle
+import caffe
+from scipy.spatial.distance import cdist
+
+from caffe_feature_extractor import CaffeFeatureExtractor
 
 MAX_NUM_IMAGES_PER_CLASS = 2 ** 27 - 1  # ~134M
 FLAGS = []
 
-def get_images(image_dir, sub_dir, extensions):
-	file_list = []
-	dir_name = os.path.basename(sub_dir)
-   	
-	for extension in extensions:
-		file_glob = os.path.join(image_dir, dir_name, '*.' + extension)
-		file_list.extend(glob(file_glob))
-	if not file_list:
-		print 'No files found'
-		return
-	if len(file_list) < 20:
-		print 'WARNING: Folder has less than 20 images, which may cause issues.'
-	elif len(file_list) > MAX_NUM_IMAGES_PER_CLASS:
-		print 'WARNING: Folder {} has more than {} images. Some images will never be selected.'.format(dir_name, MAX_NUM_IMAGES_PER_CLASS)
-	return file_list
+def get_all_features(image_dir, sub_dirs):
+	# Initialize Extraction Net (for pre-processing):
+	extractionNet = CaffeFeatureExtractor(
+		model_path = "/media/jedrzej/Seagate/Python/siamese-network/model/googlenet_deploy.prototxt",
+		pretrained_path = "/media/jedrzej/Seagate/Python/siamese-network/model/bvlc_googlenet.caffemodel",
+		blob = "pool5/7x7_s1",
+		crop_size = 224,
+		mean_values = [104.0, 117.0, 123.0]
+		)
+	all_info = []
+	for sub_dir_i, sub_dir in enumerate(sub_dirs):
+		print sub_dir_i
+		allVal = []
+		extensions = ['jpg', 'jpeg', 'JPG', 'JPEG']	# allowed image extensions
+		file_list = get_images(image_dir, sub_dir, extensions)
+
+		n = len(file_list)
+		for i in xrange(n):
+			feat = np.asarray(extractionNet.extract_feature(caffe.io.load_image(file_list[i])).reshape(1024))
+			allVal.append([file_list[i], feat.copy()])
+		all_info.append(allVal)
+	pickle.dump( all_info, open( "./train_features_70.p", "wb" ) )
+	print "File saved"
+	return all_info
 
 def get_random_image_tuples(sim_label, list_pos, list_neg, no_of_pos = 1, no_of_neg = 0):
 
@@ -46,70 +59,60 @@ def get_random_image_tuples(sim_label, list_pos, list_neg, no_of_pos = 1, no_of_
 	images = [str(i) for i in pos_images]+[str(i) for i in neg_images]
 	return [ "/".join(img.split("/")[-2:]) for img in images]
 
-def get_image_from_category(category):
-	#print category.split("/")[-1]
-	img_list = get_images("/media/jedrzej/Seagate/DATA/ILSVRC2012/TRAIN/", category.split("/")[-1], ['jpg', 'jpeg', 'JPG', 'JPEG'])
-	img = np.random.choice(img_list, 1, replace=False)[0]
-	return "/".join(img.split("/")[-2:])
+def find_hard_query(all_info, curr_category_number, positive_indices, positive = True):
+	positive_features = np.asarray([all_info[curr_category_number][i][1] for i in positive_indices])
+	positive_names = [all_info[curr_category_number][i][0] for i in positive_indices]
+	query_name = ""
+	if(positive):
+		names = []
+		distances = []
+		for i in xrange(len(all_info[curr_category_number])):
+			if i not in positive_features:
+				feat = np.asarray(all_info[curr_category_number][i][1]).reshape(1,1024)
+				Y = np.mean(cdist(positive_features,feat,'euclidean'))
+				distances.append(Y)
+				names.append(all_info[curr_category_number][i][0])
 
-def get_image_lists_with_hierarchy(high_pos_examples, low_pos_examples):
-	ILSVRC_DIR = "/media/jedrzej/Seagate/DATA/ILSVRC2012/TRAIN/"
-	folders_list = glob(ILSVRC_DIR+"*")
-	hierarchy_dict = pickle.load( open( "./hierarchy.p", "rb" ) )
+		distances = np.asarray(distances)
+		best_indices = np.argsort(distances)[::-1][:5]
+		chosen_index = np.random.choice(best_indices, 1, replace=False)[0]
+		query_name = names[chosen_index]
+	else:
+		names = []
+		distances = []
+		for j in xrange(len(all_info)):
+			if(j != curr_category_number):
+				for i in xrange(len(all_info[j])):
+					feat = np.asarray(all_info[j][i][1]).reshape(1,1024)
+					Y = np.mean(cdist(positive_features,feat,'euclidean'))
+					distances.append(Y)
+					names.append(all_info[j][i][0])
+		distances = np.asarray(distances)
+		best_indices = np.argsort(distances)[:5]
+		chosen_index = np.random.choice(best_indices, 1, replace=False)[0]
+		query_name = names[chosen_index]
+	positive_names.append(query_name)
+	return [ "/".join(name.split("/")[-2:]) for name in positive_names]
 
-	images_tuples = []
-	for key, value in hierarchy_dict.items():
-		pos_classes = list(np.unique([ILSVRC_DIR + v for v in value]))
-		#print len(pos_classes)
-		neg_classes = list(folders_list)
-		for p in pos_classes:
-			neg_classes.remove(p)
-		
-		# get high hierarchy examples:
-		for i in xrange(high_pos_examples):
-			# get positive examples
-			pos_categories = np.random.choice(pos_classes, 2, replace=False)
-			query_category = np.random.choice(pos_classes, 1, replace=False)[0]
-			pos1 = get_image_from_category(pos_categories[0])
-			pos2 = get_image_from_category(pos_categories[1])
-			query = get_image_from_category(query_category)
-			images_tuples.append([pos1,pos2,query,"1"])
-		for i in xrange(high_pos_examples):
-			# get negative examples
-			pos_categories = np.random.choice(pos_classes, 2, replace=False)
-			query_category = np.random.choice(neg_classes, 1, replace=False)[0]
-			pos1 = get_image_from_category(pos_categories[0])
-			pos2 = get_image_from_category(pos_categories[1])
-			query = get_image_from_category(query_category)
-			images_tuples.append([pos1,pos2,query,"0"])
-
-		# get low hierarchy examples:
-		for i in xrange(low_pos_examples):
-			# get positive examples
-			pos_categories = np.random.choice(pos_classes, 1, replace=False)[0]
-			pos1 = get_image_from_category(pos_categories)
-			pos2 = get_image_from_category(pos_categories)
-			query = get_image_from_category(pos_categories)
-			while(pos1==pos2 or pos1==query or pos2==query):
-				pos1 = get_image_from_category(pos_categories)
-				pos2 = get_image_from_category(pos_categories)
-				query = get_image_from_category(pos_categories)
-			images_tuples.append([pos1,pos2,query,"1"])
-		for i in xrange(low_pos_examples):
-			# get negative examples
-			pos_categories = np.random.choice(pos_classes, 2, replace=False)
-			pos1 = get_image_from_category(pos_categories[0])
-			pos2 = get_image_from_category(pos_categories[0])
-			query = get_image_from_category(pos_categories[1])
-			while(pos1==pos2):
-				pos1 = get_image_from_category(pos_categories[0])
-			images_tuples.append([pos1,pos2,query,"0"])
-	return images_tuples
+def get_images(image_dir, sub_dir, extensions):
+	file_list = []
+	dir_name = os.path.basename(sub_dir)
+   	
+	for extension in extensions:
+		file_glob = os.path.join(image_dir, dir_name, '*.' + extension)
+		file_list.extend(glob(file_glob))
+	if not file_list:
+		print 'No files found'
+		return
+	if len(file_list) < 20:
+		print 'WARNING: Folder has less than 20 images, which may cause issues.'
+	elif len(file_list) > MAX_NUM_IMAGES_PER_CLASS:
+		print 'WARNING: Folder {} has more than {} images. Some images will never be selected.'.format(dir_name, MAX_NUM_IMAGES_PER_CLASS)
+	return file_list
 
 
 
-
-def create_image_lists(image_dir, testing_percentage, validation_percentage, positive_examples_per_category, positives_to_negatives_ratio, no_of_positive_inputs, no_of_negative_inputs, hierarchy_info):
+def create_image_lists(image_dir, testing_percentage, validation_percentage, positive_examples_per_category, positives_to_negatives_ratio, no_of_positive_inputs, no_of_negative_inputs, hierarchy_info, categories_file):
 	"""Builds a list of training images from the file system.
 
 
@@ -119,19 +122,25 @@ def create_image_lists(image_dir, testing_percentage, validation_percentage, pos
 	Returns:
 	describe output
 	"""
+	
 	negative_examples_per_category = int(positive_examples_per_category/positives_to_negatives_ratio)		# how many image pairs per category
 
 	# Check if the directory exists:
 	if not os.path.isdir(image_dir):
-		print "Image directory '" + image_dir + "' not found."
+		print "Image directory " + image_dir + " not found."
 		return None
 
 	results = []	# empty list for the image tuples
 	sub_dirs = [x[0] for x in walk(image_dir)]
-
 	# The root directory comes first, so skip it.
 	sub_dirs = sub_dirs[1:]
+	sub_dirs.sort()	# sort the directories
 
+	if(categories_file!=None):
+		categories_to_use = pickle.load( open( categories_file, "rb" ) )	# use part of categories
+		sub_dirs = [sub_dirs[i] for i in categories_to_use]
+
+	
 	# Enumerate through all the categories:
 	for sub_dir_i, sub_dir in enumerate(sub_dirs):
 		print sub_dir_i
@@ -150,17 +159,9 @@ def create_image_lists(image_dir, testing_percentage, validation_percentage, pos
 			neg_indices = np.random.choice([x for x in xrange(len(sub_dirs)) if x != sub_dir_i], no_of_negative_inputs+1, replace=False)
 			image_tuples = get_random_image_tuples(0, file_list,  [get_images(image_dir, sub_dirs[j], extensions) for j in neg_indices], no_of_pos = no_of_positive_inputs, no_of_neg = no_of_negative_inputs)
 			results.append(image_tuples+["0"])
-
-	
-	if(hierarchy_info):
-		print "Calculating hierarchy"
-		# add ILSVRC 2012 hierarchy information to training:
-		hierarchy_list = get_image_lists_with_hierarchy(positive_examples_per_category*2,positive_examples_per_category/10)
-		results = results+hierarchy_list
-
 	# Shuffle the list randomly:
 	random.shuffle(results)	
-
+	print len(results)
 	# Split the tuples into training, validation and testing:
 	test_index = int((testing_percentage/100.)*len(results))
 	val_index = test_index+int((validation_percentage/100.)*len(results))
@@ -171,10 +172,9 @@ def create_image_lists(image_dir, testing_percentage, validation_percentage, pos
 	return training_data, validation_data, testing_data
 
 
-def save_list(pathList, prefix = "train"):
+def save_list(pathList, posNumber=3, negNumber=0, prefix = "train"):
 		#print pathList
 		n = len(pathList[0])-1
-		names = ["pos_1", "pos_2", "query"]
 		txtFiles = []
 		for i in xrange(n):
 			txtFiles.append("")
@@ -185,7 +185,10 @@ def save_list(pathList, prefix = "train"):
 
 		# Save all files:
 		for i in xrange(n):
-			f = open('./txtfiles/'+prefix+'_'+names[i]+'.txt','w')
+			if (i==(n-1)):
+				f = open('./txtfiles/'+prefix+'_query.txt','w')
+			else:
+				f = open('./txtfiles/'+prefix+'_'+str(i+1)+'.txt','w')
 			f.write(txtFiles[i])
 			f.close()
 
@@ -240,7 +243,14 @@ if __name__ == '__main__':
 		default=False,
 		help='Add ILSVRC 2012 hierarchy information to training.'
 	)
+	parser.add_argument(
+		'--categories',
+		type=str,
+		default=None,
+		help='Path to pickle file with categories to process.'
+	)
 	FLAGS = parser.parse_args()
-	training_data, validation_data, testing_data = create_image_lists(FLAGS.image_dir, FLAGS.testing_percentage, FLAGS.validation_percentage, FLAGS.pos_examples, FLAGS.pos_to_neg_ratio, FLAGS.pos_inputs, FLAGS.neg_inputs, FLAGS.hierarchy)
-	save_list(training_data, "train")
-	save_list(validation_data, "val")
+	#training_data, validation_data, testing_data = create_image_lists(FLAGS.image_dir, FLAGS.testing_percentage, FLAGS.validation_percentage, FLAGS.pos_examples, FLAGS.pos_to_neg_ratio, FLAGS.pos_inputs, FLAGS.neg_inputs, FLAGS.hierarchy, FLAGS.categories)
+	training_data, validation_data, testing_data = create_image_lists("/media/jedrzej/Seagate/DATA/102flowers/images/", 0, 30, 300, 1.0, 8, 0, False, "/media/jedrzej/Seagate/Python/similarity-networks/train_categories_70.p")
+	save_list(training_data, posNumber=8, prefix ="train")
+	save_list(validation_data, posNumber=8, prefix ="val")
