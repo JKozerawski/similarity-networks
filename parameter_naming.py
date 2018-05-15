@@ -4,6 +4,7 @@ LOSS_PART_1_PROTOTXT_FILE_PATH = "./general_model_files/loss_part1.prototxt"
 LOSS_PART_2_PROTOTXT_FILE_PATH = "./general_model_files/loss_part2.prototxt"
 LOSS_PART_2_DEPLOY_PROTOTXT_FILE_PATH = "./general_model_files/loss_part2_deploy.prototxt"
 BASE_PROTOTXT_FILE_PATH = "./general_model_files/inception_v1/googlenet_base.prototxt"
+BASE_DEPLOY_PROTOTXT_FILE_PATH = "./general_model_files/inception_v1/googlenet_base_deploy.prototxt"
 NEW_PROTOTXT_FILE_PATH = "./general_model_files/train_val.prototxt"
 NEW_DEPLOY_PROTOTXT_FILE_PATH = "./general_model_files/deploy.prototxt"
 
@@ -153,7 +154,7 @@ def create_similarity_network_deploy(new_tuple_arm_names,which_arms_have_shared_
 	# Create and add main body of network:
 	for arm_i, new_tuple_arm_name in enumerate(new_tuple_arm_names):
 		# creating an arm
-		with open(BASE_PROTOTXT_FILE_PATH) as f:
+		with open(BASE_DEPLOY_PROTOTXT_FILE_PATH) as f:
 		    	lines = f.readlines()
 		
 		counter = 0
